@@ -1135,34 +1135,16 @@ def load_model():
 
     try:
         return tf.keras.models.load_model(MODEL_PATH, custom_objects=custom_objects)
-    except TypeError as e:
-        if 'quantization_config' in str(e):
-            # Model was saved with a newer TF/Keras that includes 'quantization_config'
-            # in layer configs. Strip it out for older TF versions.
-            import h5py
-            import json
-
-            with h5py.File(MODEL_PATH, 'r') as f:
-                model_config = json.loads(f.attrs['model_config'])
-
-            def _strip_quantization_config(config):
-                """Recursively remove 'quantization_config' from all layer configs."""
-                if isinstance(config, dict):
-                    config.pop('quantization_config', None)
-                    for key, value in config.items():
-                        _strip_quantization_config(value)
-                elif isinstance(config, list):
-                    for item in config:
-                        _strip_quantization_config(item)
-
-            _strip_quantization_config(model_config)
-
-            # Rebuild model from cleaned config, then load weights
-            model = tf.keras.models.model_from_config(
-                model_config, custom_objects=custom_objects
-            )
-            model.load_weights(MODEL_PATH)
-            return model
-        else:
-            raise
+    except (TypeError, AttributeError, ValueError) as e:
+        # Handles cross-version compatibility issues:
+        # - TypeError: 'quantization_config' / 'batch_shape' / 'optional' (Keras 2 vs 3)
+        # - AttributeError: 'model_from_config' removed in Keras 3
+        # - ValueError: deserialization mismatches
+        # Solution: rebuild architecture from code and load only the weights.
+        print(f"[load_model] Direct load failed ({type(e).__name__}: {e})")
+        print("[load_model] Rebuilding model architecture and loading weights...")
+        num_classes = len(SHAPES)
+        model = create_cnn_vit_model(num_classes=num_classes)
+        model.load_weights(MODEL_PATH)
+        return model
 
